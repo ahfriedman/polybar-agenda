@@ -37,6 +37,8 @@ format = <label>
 format-foreground = #FFF
 format-prefix = "󰃭 "
 ```
+For example, if you are running a ubuntu based system using the default calendar app, if you provide the calendar `~/.local/share/evolution/calendar/system/calendar.ics`, you should get system calendar events. 
+
 
 ## Future Directions
 - [ ] Read the location field for events and display that if present
