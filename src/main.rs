@@ -25,7 +25,7 @@ fn fmt_duration(d: Duration) -> String {
         return format!("{}min", d.num_minutes());
     }
 
-    return format!("{}s", d.num_seconds());
+    format!("{}s", d.num_seconds())
 }
 
 fn fmt_agenda_entry(entry: AgendaEntry, when: NaiveDateTime) -> String {
@@ -41,12 +41,12 @@ fn fmt_agenda_entry(entry: AgendaEntry, when: NaiveDateTime) -> String {
         );
     }
 
-    return format!(
+    format!(
         "{} {} (in {})",
         entry.name,
         start_time,
         fmt_duration(time_until.abs())
-    );
+    )
 }
 
 fn as_naive(dt: icalendar::CalendarDateTime) -> NaiveDateTime {
@@ -119,7 +119,7 @@ fn extract_event(
                 })
                 .collect();
         }
-        Err(_) => return vec![], //println!("No rrule!"),
+        Err(_) => vec![], //println!("No rrule!"),
     }
 }
 
@@ -129,30 +129,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let parsed_calendar = file_contents.parse::<Calendar>()?;
 
         let now = Local::now();
-        let sod = now.date_naive().and_hms_opt(0, 0, 0).unwrap();
-        let eod = sod + Duration::hours(32);
 
         let current_time = now.naive_local();
 
-        let ans: String = parsed_calendar
-            .iter()
-            .flat_map(|element| {
-                match element {
-                    Event(e) => extract_event(e, now, now + Duration::hours(32)),
-                    Todo(t) => extract_event(t, now, now + Duration::hours(32)),
-                    Venue(v) => extract_event(v, now, now + Duration::hours(32)),
-                    &_ => vec![], // TODO: LOG!
-                }
-            })
-            .sorted_unstable_by_key(|item| item.start)
-            .filter(|item| {
-                (item.start + item.duration) >= current_time
-                    && (current_time - item.start).num_hours() < 24
-            })
-            .take(2)
-            .map(|item| fmt_agenda_entry(item, current_time))
-            .intersperse(" » ".to_owned())
-            .collect();
+        let ans: String = Itertools::intersperse_with(
+            parsed_calendar
+                .iter()
+                .flat_map(|element| {
+                    match element {
+                        Event(e) => extract_event(e, now, now + Duration::hours(32)),
+                        Todo(t) => extract_event(t, now, now + Duration::hours(32)),
+                        Venue(v) => extract_event(v, now, now + Duration::hours(32)),
+                        &_ => vec![], // TODO: LOG!
+                    }
+                })
+                .sorted_unstable_by_key(|item| item.start)
+                .filter(|item| {
+                    (item.start + item.duration) >= current_time
+                        && (current_time - item.start).num_hours() < 24
+                })
+                .take(2)
+                .map(|item| fmt_agenda_entry(item, current_time)),
+            || " » ".to_owned(),
+        )
+        .collect();
 
         println!("{}", ans);
     }
