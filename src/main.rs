@@ -30,18 +30,23 @@ fn fmt_duration(d: chrono::Duration) -> String {
 }
 
 fn fmt_agenda_entry(entry: AgendaEntry, when: NaiveDateTime) -> String {
-    let delta_start = entry.start - when;
-    let delta_end = (entry.start + entry.duration) - when;
+    let start_time = entry.start.format("%H:%M").to_string();
+    let time_until = when.signed_duration_since(entry.start);
 
-    if entry.start > when {
-        return format!("{} · {}", entry.name, fmt_duration(delta_start));
+    if time_until.num_minutes() > 0 || time_until.num_hours() > 0 {
+        return format!(
+            "{} {} ({} ago)",
+            entry.name,
+            start_time,
+            fmt_duration(time_until)
+        );
     }
 
     return format!(
-        "{} · {}/{}",
+        "{} {} (in {})",
         entry.name,
-        fmt_duration(delta_start),
-        fmt_duration(delta_end)
+        start_time,
+        fmt_duration(time_until.abs())
     );
 }
 
