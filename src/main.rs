@@ -32,7 +32,7 @@ fn fmt_agenda_entry(entry: AgendaEntry, when: NaiveDateTime) -> String {
     let start_time = entry.start.format("%H:%M").to_string();
     let time_until = when.signed_duration_since(entry.start);
 
-    if time_until.num_minutes() > 0 || time_until.num_hours() > 0 {
+    if time_until.num_minutes() > 0 || time_until.num_hours() > 0 || time_until.num_seconds() > 0 {
         return format!(
             "{} {} ({} ago)",
             entry.name,
