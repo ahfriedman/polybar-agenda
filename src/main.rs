@@ -1,15 +1,25 @@
-use chrono_tz::Atlantic::Reykjavik;
-use icalendar::Calendar;
-use icalendar::CalendarComponent::{Event, Todo, Venue};
-use now::DateTimeNow;
-use rrule::{RRuleSet, Tz};
-use std::{env, fs};
-
-use chrono::{Duration, Local, NaiveDateTime, TimeZone};
-
+use chrono::{DateTime, Duration, Local, NaiveDateTime, TimeZone};
+use chrono_tz::Tz;
+use icalendar::{Calendar, CalendarComponent, Component, DatePerhapsTime};
 use itertools::Itertools;
+use now::DateTimeNow;
+use rrule::{RRuleSet, Tz as RRuleTz};
+use std::{env, fs, str::FromStr};
 
+// Custom error type for better error handling
+#[derive(Debug)]
+enum CalendarError {
+    MissingStartTime,
+    MissingEndTime,
+    InvalidTimezone(String),
+    RRuleParseError(String),
+}
+
+// Constants
 const RRULE_PROPERTIES: [&str; 5] = ["DTSTART", "RRULE", "EXRULE", "RDATE", "EXDATE"];
+const MAX_EVENTS: u16 = 100;
+const HOURS_AHEAD: i64 = 32;
+const HOURS_BEHIND: i64 = 32;
 
 struct AgendaEntry {
     name: String,
@@ -17,156 +27,190 @@ struct AgendaEntry {
     duration: Duration,
 }
 
-fn fmt_duration(d: Duration) -> String {
-    if d.num_hours() != 0 {
-        return format!("{}h", d.num_hours());
+impl AgendaEntry {
+    fn new(name: String, start: NaiveDateTime, duration: Duration) -> Self {
+        Self {
+            name,
+            start,
+            duration,
+        }
     }
-
-    if d.num_minutes() != 0 {
-        return format!("{}min", d.num_minutes());
-    }
-
-    format!("{}s", d.num_seconds())
 }
 
-fn fmt_agenda_entry(entry: AgendaEntry, when: NaiveDateTime) -> String {
-    let start_time = entry.start.format("%H:%M").to_string();
-
-    let time_until = when.signed_duration_since(entry.start);
-
-    if time_until.num_minutes() > 0 || time_until.num_hours() > 0 || time_until.num_seconds() > 0 {
-        return format!(
-            "{} {} ({} ago)",
-            entry.name,
-            start_time,
-            fmt_duration(time_until)
-        );
-    }
-
-    format!(
-        "{} {} (in {})",
-        entry.name,
-        start_time,
-        fmt_duration(time_until.abs())
-    )
+#[derive(Clone, Copy)]
+enum DisplayMode {
+    Default,
+    Compact,
 }
 
-fn as_naive(dt: icalendar::CalendarDateTime) -> NaiveDateTime {
+// Convert CalendarDateTime to NaiveDateTime
+fn as_naive(dt: icalendar::CalendarDateTime) -> Result<NaiveDateTime, CalendarError> {
     match dt {
-        icalendar::CalendarDateTime::Floating(f) => f,
+        icalendar::CalendarDateTime::Floating(f) => Ok(f),
         icalendar::CalendarDateTime::Utc(u) => {
-            Local.from_utc_datetime(&u.naive_utc()).naive_local()
+            Ok(Local.from_utc_datetime(&u.naive_utc()).naive_local())
         }
         icalendar::CalendarDateTime::WithTimezone { date_time, tzid } => {
-            if tzid == "Atlantic/Reykjavik" {
-                Reykjavik
-                    .from_local_datetime(&date_time)
-                    .unwrap()
-                    .with_timezone(&Tz::Europe__Paris)
-                    .naive_local()
-            } else {
-                date_time
-            }
+            let tz =
+                Tz::from_str(&tzid).map_err(|_| CalendarError::InvalidTimezone(tzid.clone()))?;
+            tz.from_local_datetime(&date_time)
+                .single()
+                .ok_or_else(|| CalendarError::InvalidTimezone(tzid))
+                .map(|dt| dt.naive_local())
         }
     }
 }
 
+// Extract events from a calendar component
 fn extract_event(
-    event: &impl icalendar::Component,
-    sod: chrono::DateTime<Local>,
-    eod: chrono::DateTime<Local>,
-) -> Vec<AgendaEntry> {
-    let naive_start: NaiveDateTime = match event.get_start() {
-        Some(start_time) => match start_time {
-            icalendar::DatePerhapsTime::DateTime(dt) => as_naive(dt),
-            icalendar::DatePerhapsTime::Date(d) => Local
-                .from_local_date(&d)
-                .unwrap()
-                .and_hms_opt(0, 0, 0)
-                .unwrap()
-                .naive_local(),
-        },
-        None => return vec![], // TODO: error handle as event is missing a start time
+    event: &impl Component,
+    sod: DateTime<Local>,
+    eod: DateTime<Local>,
+) -> Result<Vec<AgendaEntry>, CalendarError> {
+    let start = event.get_start().ok_or(CalendarError::MissingStartTime)?;
+    let naive_start = match start {
+        DatePerhapsTime::DateTime(dt) => as_naive(dt)?,
+        DatePerhapsTime::Date(d) => Local
+            .from_local_date(&d)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .naive_local(),
     };
 
     let duration = match event.get_end() {
         Some(end_time) => match end_time {
-            icalendar::DatePerhapsTime::DateTime(et) => as_naive(et) - naive_start,
-            icalendar::DatePerhapsTime::Date(_) => {
-                Local::now().end_of_day().naive_local() - naive_start
-            }
+            DatePerhapsTime::DateTime(et) => as_naive(et)? - naive_start,
+            DatePerhapsTime::Date(_) => Local::now().end_of_day().naive_local() - naive_start,
         },
-        None => return vec![], // TODO: handle the case where we have a start time but
-                               // are missing an end time better
+        None => return Err(CalendarError::MissingEndTime),
     };
 
+    let name = event.get_summary().unwrap_or("").to_owned();
+
     if event.property_value("RRULE").is_none() {
-        return vec![AgendaEntry {
-            name: event.get_summary().unwrap_or("").to_owned(),
-            start: naive_start,
-            duration,
-        }];
+        return Ok(vec![AgendaEntry::new(name, naive_start, duration)]);
     }
 
     let props: String = RRULE_PROPERTIES
         .iter()
-        .map(|p| match event.property_value(p) {
-            Some(x) => format!("{}:{}\n", p, x),
-            None => "".to_owned(),
-        })
+        .filter_map(|&p| event.property_value(p).map(|x| format!("{}:{}\n", p, x)))
         .collect();
 
-    match props.parse::<RRuleSet>() {
-        Ok(rrule) => {
-            return rrule
-                .after(sod.with_timezone(&Tz::UTC))
-                .before(eod.with_timezone(&Tz::UTC))
-                .all(100)
-                .dates
-                .drain(..)
-                .map(|a| AgendaEntry {
-                    name: event.get_summary().unwrap_or("").to_owned(),
-                    start: Local.from_utc_datetime(&a.naive_utc()).naive_local(),
-                    duration,
-                })
-                .collect();
-        }
-        Err(_) => vec![], //println!("No rrule!"),
+    let rrule = props
+        .parse::<RRuleSet>()
+        .map_err(|e| CalendarError::RRuleParseError(e.to_string()))?;
+
+    Ok(rrule
+        .after(sod.with_timezone(&RRuleTz::UTC))
+        .before(eod.with_timezone(&RRuleTz::UTC))
+        .all(MAX_EVENTS)
+        .dates
+        .into_iter()
+        .map(|a| {
+            AgendaEntry::new(
+                name.clone(),
+                Local.from_utc_datetime(&a.naive_utc()).naive_local(),
+                duration,
+            )
+        })
+        .collect())
+}
+
+fn format_duration(d: Duration) -> String {
+    if d.num_hours() != 0 {
+        return format!("{}h", d.num_hours());
+    }
+    if d.num_minutes() != 0 {
+        return format!("{}min", d.num_minutes());
+    }
+    format!("{}s", d.num_seconds())
+}
+
+fn format_agenda_entry(mode: DisplayMode, entry: &AgendaEntry, when: NaiveDateTime) -> String {
+    match mode {
+        DisplayMode::Default => format_agenda_entry_default(entry, when),
+        DisplayMode::Compact => format_agenda_entry_compact(entry, when),
+    }
+}
+
+fn format_agenda_entry_compact(entry: &AgendaEntry, when: NaiveDateTime) -> String {
+    let time_until = entry.start.signed_duration_since(when);
+    let time_remaining = (entry.start + entry.duration).signed_duration_since(when);
+
+    if time_until.num_minutes() > 0 || time_until.num_hours() > 0 {
+        format!("{} · {}", entry.name, format_duration(time_until))
+    } else {
+        format!(
+            "{} · {}/{}",
+            entry.name,
+            format_duration(time_until.abs()),
+            format_duration(time_remaining)
+        )
+    }
+}
+
+fn format_agenda_entry_default(entry: &AgendaEntry, when: NaiveDateTime) -> String {
+    let start_time = entry.start.format("%H:%M").to_string();
+    let time_until = when.signed_duration_since(entry.start);
+
+    if time_until.num_seconds() > 0 {
+        format!(
+            "{} {} ({} ago)",
+            entry.name,
+            start_time,
+            format_duration(time_until)
+        )
+    } else {
+        format!(
+            "{} {} (in {})",
+            entry.name,
+            start_time,
+            format_duration(time_until.abs())
+        )
     }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(file_name) = env::args().nth(1) {
-        let file_contents = fs::read_to_string(file_name)?;
-        let parsed_calendar = file_contents.parse::<Calendar>()?;
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 2 {
+        return Err("Calendar file not provided".into());
+    }
 
-        let now = Local::now();
+    let mode = if args.len() >= 3 && args[1] == "--display-compact" {
+        DisplayMode::Compact
+    } else {
+        DisplayMode::Default
+    };
 
-        let current_time = now.naive_local();
+    let file_name = args.last().unwrap();
+    let file_contents = fs::read_to_string(file_name)?;
+    let parsed_calendar = file_contents.parse::<Calendar>()?;
 
-        let ans: String = Itertools::intersperse_with(
-            parsed_calendar
-                .iter()
-                .flat_map(|element| {
-                    match element {
-                        Event(e) => extract_event(e, now, now + Duration::hours(32)),
-                        Todo(t) => extract_event(t, now, now + Duration::hours(32)),
-                        Venue(v) => extract_event(v, now, now + Duration::hours(32)),
-                        &_ => vec![], // TODO: LOG!
-                    }
-                })
-                .sorted_unstable_by_key(|item| item.start)
-                .filter(|item| {
-                    (item.start + item.duration) >= current_time
-                        && (current_time - item.start).num_hours() < 24
-                })
-                .take(2)
-                .map(|item| fmt_agenda_entry(item, current_time)),
-            || " » ".to_owned(),
-        )
+    let now = Local::now();
+    let current_time = now.naive_local();
+    let extract_start = now - Duration::hours(HOURS_BEHIND);
+    let extract_end = now + Duration::hours(HOURS_AHEAD);
+
+    let formatted_agenda: String = parsed_calendar
+        .iter()
+        .filter_map(|element| match element {
+            CalendarComponent::Event(e) => extract_event(e, extract_start, extract_end).ok(),
+            CalendarComponent::Todo(t) => extract_event(t, extract_start, extract_end).ok(),
+            CalendarComponent::Venue(v) => extract_event(v, extract_start, extract_end).ok(),
+            _ => None,
+        })
+        .flatten()
+        .sorted_unstable_by_key(|item| item.start)
+        .filter(|item| {
+            (item.start + item.duration) >= current_time
+                && (current_time - item.start).num_hours() < 24
+        })
+        .take(2)
+        .map(|item| format_agenda_entry(mode, &item, current_time))
+        .intersperse(" » ".to_owned())
         .collect();
 
-        println!("{}", ans);
-    }
+    println!("{}", formatted_agenda);
     Ok(())
 }
