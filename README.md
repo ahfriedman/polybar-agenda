@@ -9,17 +9,28 @@ Unlike exising polybar calendar solutions such as [i3-agenda](https://github.com
 
 ## Features/What does it do?
 
-This module will read a calendar file (ics), and will display up to the next two events you have for today. This is in the format of either: 
+This module will read a calendar file (ics), and will display up to the next two events you have for today with 
+information about each event separated by "»". Information about events can be displayed in the following formats: 
+**Default Display Mode**
+For upcomming events: 
+```
+<event name> <event time> (in <time until event>) 
+```
+For ongoing events: 
+```
+<event name> <event time> (<time since start> ago)
+```
 
+**Compact Display Mode**
+For upcomming events: 
 ```
-<event 1 name> · <time until event 1> (» <event 2 name> · <time until event 2>)?
+<event name> · <time until event> 
 ```
-or
+When an event is in progress:
 ```
-<event 1 name> · <time since start of event 1>/<time until end of event 1> (» <event 2 name> · <time until event 2>)?
+<event name> · <time since start of event>/<time until end of event>
 ```
-depending on if there is a current ongoing event or not. For instance, in the example image above, the calendar event dinner started 48 minutes ago and there is one hour until the end of the event. 
-The subsequent event, rest, starts in one hour as well. 
+
 
 This is all designed to work out of the box with system calendars---including recurring events.
 
@@ -39,6 +50,7 @@ format-prefix = "󰃭 "
 ```
 For example, if you are running a ubuntu based system using the default calendar app, if you provide the calendar `~/.local/share/evolution/calendar/system/calendar.ics`, you should get system calendar events. 
 
+To switch to the compact display mode, pass the parameter `--display-compact` before specifying the ics file to read.
 
 ## Future Directions
 - [ ] Read the location field for events and display that if present
