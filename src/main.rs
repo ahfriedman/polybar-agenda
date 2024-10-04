@@ -16,10 +16,10 @@ struct AgendaEntry {
     duration: Duration,
 }
 
-#[derive(Clone,Copy)]
+#[derive(Clone, Copy)]
 enum DisplayMode {
-    Default, 
-    Compact
+    Default,
+    Compact,
 }
 
 fn fmt_duration(d: Duration) -> String {
@@ -37,7 +37,7 @@ fn fmt_duration(d: Duration) -> String {
 fn fmt_agenda_entry(mode: DisplayMode, entry: AgendaEntry, when: NaiveDateTime) -> String {
     match mode {
         DisplayMode::Default => fmt_agenda_entry_default(entry, when),
-        DisplayMode::Compact => fmt_agenda_entry_compact(entry, when)
+        DisplayMode::Compact => fmt_agenda_entry_compact(entry, when),
     }
 }
 
@@ -46,17 +46,15 @@ fn fmt_agenda_entry_compact(entry: AgendaEntry, when: NaiveDateTime) -> String {
     let time_remaining = (entry.start + entry.duration).signed_duration_since(when);
 
     if time_until.num_minutes() > 0 || time_until.num_hours() > 0 {
-        return format!(
-        "{} · {}",
-        entry.name,
-        fmt_duration(time_until));
+        return format!("{} · {}", entry.name, fmt_duration(time_until));
     }
 
     format!(
         "{} · {}/{}",
         entry.name,
         fmt_duration(time_until),
-        fmt_duration(time_remaining))
+        fmt_duration(time_remaining)
+    )
 }
 
 fn fmt_agenda_entry_default(entry: AgendaEntry, when: NaiveDateTime) -> String {
@@ -155,17 +153,21 @@ fn extract_event(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args : Vec<_> = env::args().collect();
+    let args: Vec<_> = env::args().collect();
     if args.len() < 1 {
         println!("Calendar file not provided");
         return Result::Ok(());
     }
 
     println!("{args:?}");
-    let mode = if args.len() == 3 { match args.get(1).unwrap().as_str() {
-        "--display-compact" => DisplayMode::Compact,
-        _ => DisplayMode::Default,
-    }} else { DisplayMode::Default };
+    let mode = if args.len() == 3 {
+        match args.get(1).unwrap().as_str() {
+            "--display-compact" => DisplayMode::Compact,
+            _ => DisplayMode::Default,
+        }
+    } else {
+        DisplayMode::Default
+    };
 
     if let Some(file_name) = args.last() {
         let file_contents = fs::read_to_string(file_name)?;
