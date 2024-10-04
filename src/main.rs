@@ -1,3 +1,4 @@
+use chrono_tz::Atlantic::Reykjavik;
 use icalendar::Calendar;
 use icalendar::CalendarComponent::{Event, Todo, Venue};
 use now::DateTimeNow;
@@ -30,6 +31,7 @@ fn fmt_duration(d: Duration) -> String {
 
 fn fmt_agenda_entry(entry: AgendaEntry, when: NaiveDateTime) -> String {
     let start_time = entry.start.format("%H:%M").to_string();
+
     let time_until = when.signed_duration_since(entry.start);
 
     if time_until.num_minutes() > 0 || time_until.num_hours() > 0 || time_until.num_seconds() > 0 {
@@ -55,7 +57,17 @@ fn as_naive(dt: icalendar::CalendarDateTime) -> NaiveDateTime {
         icalendar::CalendarDateTime::Utc(u) => {
             Local.from_utc_datetime(&u.naive_utc()).naive_local()
         }
-        icalendar::CalendarDateTime::WithTimezone { date_time, tzid } => date_time,
+        icalendar::CalendarDateTime::WithTimezone { date_time, tzid } => {
+            if tzid == "Atlantic/Reykjavik" {
+                Reykjavik
+                    .from_local_datetime(&date_time)
+                    .unwrap()
+                    .with_timezone(&Tz::Europe__Paris)
+                    .naive_local()
+            } else {
+                date_time
+            }
+        }
     }
 }
 

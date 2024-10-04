@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 chrono = "0.4.38"
-chrono-tz = "0.9.0"
+chrono-tz = "0.10.0"
 icalendar = "0.16.5"
 itertools = "0.13.0"
 now = "0.1.3"
