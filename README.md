@@ -11,7 +11,9 @@ Unlike exising polybar calendar solutions such as [i3-agenda](https://github.com
 
 This module will read a calendar file (ics), and will display up to the next two events you have for today with 
 information about each event separated by "»". Information about events can be displayed in the following formats: 
+
 **Default Display Mode**
+
 For upcomming events: 
 ```
 <event name> <event time> (in <time until event>) 
@@ -22,6 +24,7 @@ For ongoing events:
 ```
 
 **Compact Display Mode**
+
 For upcomming events: 
 ```
 <event name> · <time until event> 
