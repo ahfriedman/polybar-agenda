@@ -16,6 +16,12 @@ struct AgendaEntry {
     duration: Duration,
 }
 
+#[derive(Clone,Copy)]
+enum DisplayMode {
+    Default, 
+    Compact
+}
+
 fn fmt_duration(d: Duration) -> String {
     if d.num_hours() != 0 {
         return format!("{}h", d.num_hours());
@@ -28,7 +34,32 @@ fn fmt_duration(d: Duration) -> String {
     format!("{}s", d.num_seconds())
 }
 
-fn fmt_agenda_entry(entry: AgendaEntry, when: NaiveDateTime) -> String {
+fn fmt_agenda_entry(mode: DisplayMode, entry: AgendaEntry, when: NaiveDateTime) -> String {
+    match mode {
+        DisplayMode::Default => fmt_agenda_entry_default(entry, when),
+        DisplayMode::Compact => fmt_agenda_entry_compact(entry, when)
+    }
+}
+
+fn fmt_agenda_entry_compact(entry: AgendaEntry, when: NaiveDateTime) -> String {
+    let time_until = entry.start.signed_duration_since(when);
+    let time_remaining = (entry.start + entry.duration).signed_duration_since(when);
+
+    if time_until.num_minutes() > 0 || time_until.num_hours() > 0 {
+        return format!(
+        "{} · {}",
+        entry.name,
+        fmt_duration(time_until));
+    }
+
+    format!(
+        "{} · {}/{}",
+        entry.name,
+        fmt_duration(time_until),
+        fmt_duration(time_remaining))
+}
+
+fn fmt_agenda_entry_default(entry: AgendaEntry, when: NaiveDateTime) -> String {
     let start_time = entry.start.format("%H:%M").to_string();
     let time_until = when.signed_duration_since(entry.start);
 
@@ -124,7 +155,19 @@ fn extract_event(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(file_name) = env::args().nth(1) {
+    let args : Vec<_> = env::args().collect();
+    if args.len() < 1 {
+        println!("Calendar file not provided");
+        return Result::Ok(());
+    }
+
+    println!("{args:?}");
+    let mode = if args.len() == 3 { match args.get(1).unwrap().as_str() {
+        "--display-compact" => DisplayMode::Compact,
+        _ => DisplayMode::Default,
+    }} else { DisplayMode::Default };
+
+    if let Some(file_name) = args.last() {
         let file_contents = fs::read_to_string(file_name)?;
         let parsed_calendar = file_contents.parse::<Calendar>()?;
 
@@ -132,14 +175,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let current_time = now.naive_local();
 
+        let extract_start = now - Duration::hours(32);
+        let extract_end = now + Duration::hours(32);
+
         let ans: String = Itertools::intersperse_with(
             parsed_calendar
                 .iter()
                 .flat_map(|element| {
                     match element {
-                        Event(e) => extract_event(e, now, now + Duration::hours(32)),
-                        Todo(t) => extract_event(t, now, now + Duration::hours(32)),
-                        Venue(v) => extract_event(v, now, now + Duration::hours(32)),
+                        Event(e) => extract_event(e, extract_start, extract_end),
+                        Todo(t) => extract_event(t, extract_start, extract_end),
+                        Venue(v) => extract_event(v, extract_start, extract_end),
                         &_ => vec![], // TODO: LOG!
                     }
                 })
@@ -149,7 +195,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         && (current_time - item.start).num_hours() < 24
                 })
                 .take(2)
-                .map(|item| fmt_agenda_entry(item, current_time)),
+                .map(|item| fmt_agenda_entry(mode, item, current_time)),
             || " » ".to_owned(),
         )
         .collect();
