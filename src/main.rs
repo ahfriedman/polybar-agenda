@@ -54,7 +54,9 @@ mod calendar {
                 Ok(Local.from_utc_datetime(&u.naive_utc()).naive_local())
             }
             icalendar::CalendarDateTime::WithTimezone { date_time, tzid } => {
-                let tz = Tz::from_str(&tzid)
+                // See https://github.com/ahfriedman/polybar-agenda/pull/2#issuecomment-2408742959
+                let fixed_zone = if tzid.starts_with("/freeassociation.sourceforge.net/") {tzid[33..].to_string()} else {tzid.clone()};
+                let tz = Tz::from_str(&fixed_zone)
                     .map_err(|_| CalendarError::InvalidTimezone(tzid.clone()))?;
                 tz.from_local_datetime(&date_time)
                     .single()
