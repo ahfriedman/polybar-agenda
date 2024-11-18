@@ -20,7 +20,7 @@ fn test_format_duration() {
     assert_eq!(format_duration(Duration::seconds(45)), "45s");
     assert_eq!(
         format_duration(Duration::hours(1) + Duration::minutes(30)),
-        "1h"
+        "1.5h"
     );
     assert_eq!(format_duration(Duration::zero()), "0s");
 }
@@ -65,23 +65,23 @@ fn test_format_agenda_entry_compact() {
     // Test future event
     let future_event = AgendaEntry::new(
         "Future Event".to_string(),
-        now + Duration::minutes(30),
+        now + Duration::minutes(45),
         Duration::hours(1),
     );
     assert_eq!(
         format_agenda_entry_compact(&future_event, now),
-        "Future Event · 30min"
+        "Future Event · 45min"
     );
 
     // Test ongoing event
     let ongoing_event = AgendaEntry::new(
         "Ongoing Event".to_string(),
-        now - Duration::minutes(30),
+        now - Duration::minutes(45),
         Duration::hours(2),
     );
     assert_eq!(
         format_agenda_entry_compact(&ongoing_event, now),
-        "Ongoing Event · 30min/1h"
+        "Ongoing Event · 45min/1.25h"
     );
 }
 
