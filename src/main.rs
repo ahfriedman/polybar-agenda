@@ -124,7 +124,7 @@ mod calendar {
 
     pub fn format_duration(d: Duration) -> String {
         if d.num_hours() != 0 {
-            let hrs_fmt = ((d.num_minutes() as f32 / 60.0) * 4.0).floor() / 4.0;
+            let hrs_fmt = ((d.num_minutes() as f32 / 60.0) * 4.0).ceil() / 4.0;
             return format!("{}h", hrs_fmt);
         }
         if d.num_minutes() != 0 {
