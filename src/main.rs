@@ -181,11 +181,10 @@ mod calendar {
         }
     }
 
-    pub fn process_calendar(
+    pub fn extract_entries(
         calendar: &Calendar,
-        mode: DisplayMode,
         now: DateTime<Local>,
-    ) -> String {
+    ) -> Vec<AgendaEntry> {
         let current_time = now.naive_local();
         let extract_start = now - Duration::hours(HOURS_BEHIND);
         let extract_end = now + Duration::hours(HOURS_AHEAD);
@@ -205,15 +204,77 @@ mod calendar {
                     && (current_time - item.start).num_hours() < 24
             })
             .take(2)
+            .collect()
+    }
+
+
+    pub fn process_calendar(
+        entries: &Vec<AgendaEntry>,
+        mode: DisplayMode,
+        now: DateTime<Local>,
+    ) -> String {
+        let current_time = now.naive_local();
+
+        entries
+            .iter()
             .map(|item| format_agenda_entry(mode, &item, current_time))
             .intersperse(" » ".to_owned())
             .collect()
     }
+
+    pub fn get_temporal_resolution(
+        entry_opt: Option<&AgendaEntry>,
+        when: NaiveDateTime
+    ) -> Duration {
+        if entry_opt.is_none() {
+            return Duration::hours(6);
+        }
+        let entry = entry_opt.unwrap();
+        let time_until = entry.start.signed_duration_since(when).abs();
+        let time_remaining = (entry.start + entry.duration).signed_duration_since(when);
+
+        if time_until.num_seconds() <= 90 || time_remaining.num_seconds() <= 90 {
+            return Duration::seconds(1);
+        }
+
+        if time_until.num_minutes() <= 75 || time_remaining.num_minutes() <= 75 {
+            return Duration::minutes(1);
+        }
+
+        let res0 = time_until.num_minutes() % 60 % 15;
+        let res1 = time_remaining.num_minutes() % 60 % 15;
+
+        if res0 < res1 && res0 != 0 {
+            return Duration::minutes(res0)
+        }
+
+        if res1 < res0 && res1 != 0 {
+            return Duration::minutes(res1)
+        }
+
+        if res0 == 0 {
+            return Duration::minutes(7)
+        }
+
+        return Duration::minutes(res0);
+    }
+
+    pub fn calculate_next_update_duration(
+        entries: &Vec<AgendaEntry>,
+        when: NaiveDateTime
+    ) -> Duration {
+        let res0 = get_temporal_resolution(entries.get(0), when);
+        let res1 = get_temporal_resolution(entries.get(1), when);
+        if res0 < res1 { return res0 };
+        return res1;
+    }
+
 }
 
-use calendar::{process_calendar, DisplayMode};
-use chrono::Local;
+use calendar::{calculate_next_update_duration, extract_entries, process_calendar, DisplayMode};
+use chrono::{Duration, Local};
 use icalendar::Calendar;
+use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
@@ -228,14 +289,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let file_name = args.last().unwrap();
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut watcher = RecommendedWatcher::new(tx, Config::default())?;
+
     let file_contents = fs::read_to_string(file_name)?;
-    let parsed_calendar = file_contents.parse::<Calendar>()?;
+    let mut parsed_calendar = file_contents.parse::<Calendar>()?;
 
-    let now = Local::now();
+    watcher.watch(file_name.as_ref(), RecursiveMode::NonRecursive)?;
 
-    let formatted_agenda = process_calendar(&parsed_calendar, mode, now);
+    let mut dur_next_update = Duration::seconds(0);
 
-    println!("{}", formatted_agenda);
+    loop {
+        match rx.recv_timeout(dur_next_update.to_std().unwrap()) {
+            Ok(_) => {
+                let file_contents = fs::read_to_string(file_name)?;
+                parsed_calendar = file_contents.parse::<Calendar>()?;
+                // By reading the file, we trigger an update to it, so we need to clear that update
+                // before we enter infinite recursion
+                let _ = rx.recv()?;
+                dur_next_update = Duration::seconds(0);
+            },
+            Err(error) => {
+                match error {
+                    std::sync::mpsc::RecvTimeoutError::Timeout => {
+                        let now = Local::now();
+
+                        let entries = extract_entries(&parsed_calendar, now);
+
+                        let formatted_agenda = process_calendar(&entries, mode, now);
+
+                        println!("{}", formatted_agenda);
+                        dur_next_update = calculate_next_update_duration(&entries, Local::now().naive_local());
+                    },
+                    std::sync::mpsc::RecvTimeoutError::Disconnected => {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
